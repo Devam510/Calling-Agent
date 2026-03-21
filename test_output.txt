@@ -1,0 +1,54 @@
+﻿.........FF........F..                                                   [100%]
+================================== FAILURES ===================================
+_______________________ test_export_creates_three_files _______________________
+..\..\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:1423: in patched
+    with self.decoration_helper(patched,
+..\..\AppData\Local\Programs\Python\Python313\Lib\contextlib.py:141: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+..\..\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:1405: in decoration_helper
+    arg = exit_stack.enter_context(patching)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+..\..\AppData\Local\Programs\Python\Python313\Lib\contextlib.py:530: in enter_context
+    result = _enter(cm)
+             ^^^^^^^^^^
+..\..\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:1481: in __enter__
+    self.target = self.getter()
+                  ^^^^^^^^^^^^^
+..\..\AppData\Local\Programs\Python\Python313\Lib\pkgutil.py:528: in resolve_name
+    result = getattr(result, p)
+             ^^^^^^^^^^^^^^^^^^
+E   AttributeError: module 'backend' has no attribute 'audio_mixer'
+____________________ test_export_raises_on_empty_recorder _____________________
+.venv\Lib\site-packages\pydub\utils.py:14: in <module>
+    import audioop
+E   ModuleNotFoundError: No module named 'audioop'
+
+During handling of the above exception, another exception occurred:
+tests\test_recording.py:87: in test_export_raises_on_empty_recorder
+    from backend.audio_mixer import export_recordings
+backend\audio_mixer.py:14: in <module>
+    from pydub import AudioSegment
+.venv\Lib\site-packages\pydub\__init__.py:1: in <module>
+    from .audio_segment import AudioSegment
+.venv\Lib\site-packages\pydub\audio_segment.py:11: in <module>
+    from .utils import mediainfo_json, fsdecode
+.venv\Lib\site-packages\pydub\utils.py:16: in <module>
+    import pyaudioop as audioop
+E   ModuleNotFoundError: No module named 'pyaudioop'
+_______________________ test_retries_on_malformed_json ________________________
+tests\test_transcript_analyzer.py:53: in test_retries_on_malformed_json
+    assert result.status == CallStatus.NOT_INTERESTED
+E   AssertionError: assert <CallStatus.FAILED: 'failed'> == <CallStatus.N...t_interested'>
+E     
+E     - not_interested
+E     + failed
+------------------------------ Captured log call ------------------------------
+ERROR    backend.transcript_analyzer:transcript_analyzer.py:86 Groq attempt 1 failed: '\n  "status"'
+WARNING  backend.transcript_analyzer:transcript_analyzer.py:53 JSON parse failed: Expecting value: line 1 column 1 (char 0) | raw="Sure! Here's the analysis: interesting call!"
+ERROR    backend.transcript_analyzer:transcript_analyzer.py:34 Analysis failed ù returning FAILED default. Reason: Both Groq attempts failed or returned unparseable JSON
+=========================== short test summary info ===========================
+FAILED tests/test_recording.py::test_export_creates_three_files - AttributeEr...
+FAILED tests/test_recording.py::test_export_raises_on_empty_recorder - Module...
+FAILED tests/test_transcript_analyzer.py::test_retries_on_malformed_json - As...
+3 failed, 19 passed in 1.20s

@@ -1,0 +1,23 @@
+You are a call analyst. Analyze the following call transcript and return a JSON object.
+
+TRANSCRIPT:
+{transcript}
+
+Return ONLY valid JSON — no explanation, no markdown fences. Use this exact schema:
+{
+  "status": "<one of: interested | not_interested | follow_up | no_answer | busy | wrong_number | do_not_call | failed>",
+  "summary": "<2-3 sentence English summary of the call outcome>",
+  "followup_date": "<ISO date YYYY-MM-DD if follow-up agreed, else null>"
+}
+
+Rules:
+- "interested": owner expressed clear interest or asked for more info
+- "follow_up": owner asked to be called back at a specific time
+- "not_interested": owner explicitly said not interested
+- "no_answer": call was not picked up or ended before connection
+- "busy": owner said they are busy, no follow-up date
+- "wrong_number": wrong person answered
+- "do_not_call": owner asked not to be called again
+- "failed": technical failure, unclear conversation, or cannot determine
+
+Do not infer — base your answer only on the transcript.
