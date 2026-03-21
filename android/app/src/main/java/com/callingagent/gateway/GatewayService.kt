@@ -8,6 +8,9 @@ import android.content.Intent
 import android.os.IBinder
 import android.telecom.TelecomManager
 import android.util.Log
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.core.content.ContextCompat
 import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.*
 
@@ -37,7 +40,15 @@ class GatewayService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
-        startForeground(NOTIFICATION_ID, buildNotification("Gateway idle"))
+        if (android.os.Build.VERSION.SDK_INT >= 34) {
+            startForeground(
+                NOTIFICATION_ID, 
+                buildNotification("Gateway idle"), 
+                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, buildNotification("Gateway idle"))
+        }
         Log.i(TAG, "GatewayService created")
     }
 
@@ -68,20 +79,17 @@ class GatewayService : Service() {
             is GatewayCommand.StartCall -> {
                 updateNotification("Dialing ${cmd.phoneNumber}…")
                 dialNumber(cmd.phoneNumber)
+                // Since we rely on ACTION_CALL, we can't detect when the call answers.
+                // Start streaming immediately.
+                startAudioStreaming()
             }
             is GatewayCommand.EndCall -> {
                 hangUp()
-                audioStreamer?.stop()
-                audioStreamer = null
+                stopAudioStreaming()
                 updateNotification("Gateway idle")
             }
             is GatewayCommand.CallConnected -> {
-                // Backend confirmed call is connected — start audio capture
-                updateNotification("Call active ▶ streaming")
-                audioStreamer = AudioStreamer { pcmChunk ->
-                    webSocketBridge.sendAudioIn(pcmChunk)
-                }
-                audioStreamer?.start()
+                // Not used with ACTION_CALL
             }
             is GatewayCommand.AudioOut -> {
                 // PCM from TTS — play via speakerphone (raw track)
@@ -90,16 +98,40 @@ class GatewayService : Service() {
         }
     }
 
+    private fun startAudioStreaming() {
+        if (audioStreamer != null) return
+        audioStreamer = AudioStreamer { pcmChunk ->
+            webSocketBridge.sendAudioIn(pcmChunk)
+        }
+        audioStreamer?.start()
+    }
+
+    private fun stopAudioStreaming() {
+        audioStreamer?.stop()
+        audioStreamer = null
+    }
+
+    /** Send call state updates back to the Python backend */
+    fun sendCallState(state: String) {
+        serviceScope.launch {
+            try {
+                webSocketBridge.sendEvent(GatewayEvent.CallStateChanged(state))
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to send call state", e)
+            }
+        }
+    }
+
     // ─── Telephony helpers ────────────────────────────────────────────────────
 
     private fun dialNumber(number: String) {
         try {
-            val telecom = getSystemService(TELECOM_SERVICE) as TelecomManager
-            // Requires CALL_PHONE permission granted at runtime
+            // Revert to ACTION_CALL because placeCall silently drops the request on some OSes
             val uri = android.net.Uri.parse("tel:$number")
-            val extras = android.os.Bundle()
-            telecom.placeCall(uri, extras)
-            Log.i(TAG, "placeCall($number) invoked")
+            val intent = Intent(Intent.ACTION_CALL, uri)
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            startActivity(intent)
+            Log.i(TAG, "ACTION_CALL($number) invoked")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to dial: ${e.message}")
             webSocketBridge.sendEvent(GatewayEvent.Error("dial_failed: ${e.message}"))

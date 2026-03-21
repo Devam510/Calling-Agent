@@ -44,12 +44,17 @@ _batch_task: Optional[asyncio.Task] = None
 _session_store: Optional[SessionStore] = None
 
 
+from backend.call_controller import init_gateway_server
+
 @app.on_event("startup")
 async def startup() -> None:
     global _session_store
     _session_store = SessionStore()
     await _session_store.initialize()
-    logger.info("Server started — session store ready.")
+    
+    # Start WebSocket server
+    await init_gateway_server(host="0.0.0.0", port=8765)
+    logger.info("Server started — session store ready, WebSocket gateway listening on 8765.")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -80,6 +85,29 @@ async def status():
         "recording_enabled": settings.recording_enabled,
         "android_gateway": settings.android_gateway_ws_url,
     }
+
+
+@app.post("/call/start")
+async def call_start(req: StartCallRequest):
+    global _session_store
+    
+    if req.phone:
+        from backend.models import Lead
+        lead = Lead(
+            id="manual",
+            company_name="Manual",
+            owner_name="Unknown",
+            phone=req.phone,
+            city="Unknown"
+        )
+    else:
+        lead = fetch_next_lead()
+        if not lead:
+            raise HTTPException(status_code=404, detail="No uncalled leads available.")
+
+    from backend.orchestrator import _run_single_call
+    asyncio.create_task(_run_single_call(lead, _session_store))
+    return {"message": "Call initiated", "phone": lead.phone}
 
 
 @app.post("/batch/start")

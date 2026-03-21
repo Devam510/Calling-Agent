@@ -31,6 +31,7 @@ dependencies = [
     # CPU-only torch — avoids the 3 GB CUDA download on a dev machine
     "torch>=2.0.0",
     "torchaudio>=2.0.0",
+    "sounddevice>=0.5.5",
 ]
 
 [project.optional-dependencies]

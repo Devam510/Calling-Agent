@@ -75,23 +75,35 @@ class WebSocketBridge(
 
     /** Send raw PCM captured from mic to the backend. */
     fun sendAudioIn(pcm: ByteArray) {
+        val payload = JSONObject().apply {
+            put("data", Base64.encodeToString(pcm, Base64.NO_WRAP))
+        }
         val json = JSONObject().apply {
             put("type", "AUDIO_IN")
-            put("data", Base64.encodeToString(pcm, Base64.NO_WRAP))
+            put("payload", payload)
         }
         ws?.send(json.toString())
     }
 
     /** Send a state-change event to the backend. */
     fun sendEvent(event: GatewayEvent) {
-        val json = when (event) {
-            is GatewayEvent.Ringing       -> JSONObject().put("type", "RINGING")
-            is GatewayEvent.Connected     -> JSONObject().put("type", "CONNECTED")
-            is GatewayEvent.Disconnected  -> JSONObject().put("type", "DISCONNECTED")
-            is GatewayEvent.CallStateChanged -> JSONObject()
-                .put("type", "CALL_STATE").put("state", event.state)
-            is GatewayEvent.Error         -> JSONObject()
-                .put("type", "ERROR").put("message", event.message)
+        val payload = JSONObject()
+        val type = when (event) {
+            is GatewayEvent.Ringing       -> "RINGING"
+            is GatewayEvent.Connected     -> "CONNECTED"
+            is GatewayEvent.Disconnected  -> "DISCONNECTED"
+            is GatewayEvent.CallStateChanged -> {
+                payload.put("state", event.state)
+                "CALL_STATE"
+            }
+            is GatewayEvent.Error         -> {
+                payload.put("message", event.message)
+                "ERROR"
+            }
+        }
+        val json = JSONObject().apply {
+            put("type", type)
+            put("payload", payload)
         }
         ws?.send(json.toString())
     }
@@ -101,15 +113,18 @@ class WebSocketBridge(
     private fun parseAndDispatch(text: String) {
         runCatching {
             val json = JSONObject(text)
-            when (json.getString("type")) {
-                "START_CALL"     -> onCommand(GatewayCommand.StartCall(json.getString("phone")))
+            val type = json.getString("type")
+            val payload = json.optJSONObject("payload") ?: JSONObject()
+            
+            when (type) {
+                "START_CALL"     -> onCommand(GatewayCommand.StartCall(payload.getString("phone")))
                 "END_CALL"       -> onCommand(GatewayCommand.EndCall)
                 "CALL_CONNECTED" -> onCommand(GatewayCommand.CallConnected)
                 "AUDIO_OUT"      -> {
-                    val raw = Base64.decode(json.getString("data"), Base64.NO_WRAP)
+                    val raw = Base64.decode(payload.getString("data"), Base64.NO_WRAP)
                     onCommand(GatewayCommand.AudioOut(raw))
                 }
-                else -> Log.w(TAG, "Unknown command type: ${json.getString("type")}")
+                else -> Log.w(TAG, "Unknown command type: $type")
             }
         }.onFailure { Log.e(TAG, "Parse error: $text", it) }
     }

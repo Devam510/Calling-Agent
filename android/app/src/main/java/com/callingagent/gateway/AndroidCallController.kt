@@ -48,9 +48,14 @@ class AndroidCallController(private val context: Context) {
      */
     fun sendDtmf(digits: String) {
         CallService.currentCall?.let { call ->
-            digits.forEach { digit ->
-                call.sendDtmfTone(digit)
-                Log.d(TAG, "Sent DTMF: $digit")
+            scope.launch {
+                digits.forEach { digit ->
+                    call.playDtmfTone(digit)
+                    kotlinx.coroutines.delay(200)
+                    call.stopDtmfTone()
+                    kotlinx.coroutines.delay(100)
+                    Log.d(TAG, "Sent DTMF: $digit")
+                }
             }
         } ?: Log.w(TAG, "No active call for DTMF: $digits")
     }

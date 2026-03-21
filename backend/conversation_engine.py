@@ -1,86 +1,68 @@
-"""
-conversation_engine.py — Groq LLM inference for the sales conversation.
-
-Maintains message history per call and provides a single `chat()` entrypoint.
-"""
-
-from __future__ import annotations
-
-import logging
+import os
 from pathlib import Path
-from typing import Optional
-
-from groq import Groq
+from typing import List, Dict
+import groq
 
 from backend.config import settings
 from backend.models import Lead
 
-logger = logging.getLogger(__name__)
-
-_PROMPT_DIR = Path(__file__).parent.parent / "prompts"
-
+PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
 
 def _load_system_prompt(lead: Lead) -> str:
-    """Load and format the sales system prompt with lead-specific data."""
-    template = (_PROMPT_DIR / "sales_system_prompt.txt").read_text(encoding="utf-8")
-    return template.format(
-        owner_name=lead.owner_name,
-        company_name=lead.company_name,
-        business_type=lead.business_type,
-        city=lead.city,
-    )
+    prompt_path = PROMPTS_DIR / "sales_system_prompt.txt"
+    try:
+        with open(prompt_path, "r", encoding="utf-8") as f:
+            template = f.read()
+    except FileNotFoundError:
+        return f"You are a sales agent calling {lead.owner_name} from {lead.company_name}."
+    
+    return template.replace("{company_name}", lead.company_name).replace("{owner_name}", lead.owner_name)
 
 
 class ConversationEngine:
-    """
-    Wraps Groq API with a stateful message history for one call.
-
-    Usage:
-        engine = ConversationEngine(lead)
-        reply = engine.chat("नमस्ते, कौन है?")
-    """
-
-    def __init__(self, lead: Lead) -> None:
-        self._client = Groq(api_key=settings.groq_api_key)
-        self._system_prompt = _load_system_prompt(lead)
-        self._history: list[dict] = []
-
-    def chat(self, user_message: str) -> str:
-        """
-        Send user message, get agent reply.
-
-        Args:
-            user_message: Transcribed speech from the customer.
-
-        Returns:
-            Agent response text to be synthesized by TTS.
-        """
-        self._history.append({"role": "user", "content": user_message})
-
-        messages = [
-            {"role": "system", "content": self._system_prompt},
-            *self._history,
+    def __init__(self, lead: Lead, client: groq.AsyncGroq = None):
+        self.lead = lead
+        self.client = client or groq.AsyncGroq(api_key=settings.groq_api_key)
+        self.history: List[Dict[str, str]] = [
+            {"role": "system", "content": _load_system_prompt(lead)}
         ]
 
-        response = self._client.chat.completions.create(
-            model=settings.groq_model,
-            messages=messages,
-            max_tokens=150,   # keep replies short for phone conversation
-            temperature=0.7,
-        )
+    async def get_response(self, user_text: str) -> str:
+        """
+        Append user_text to history, call Groq API for a response, append and return the response.
+        If user_text is '[CALL_STARTED]', generate the initial greeting without adding user_text to history as a normal user message.
+        """
+        if user_text == "[CALL_STARTED]":
+            # For the first greeting, we just want the model to act. We send an invisible trigger.
+            # We don't append this exact token to history as it's not a real user utterance,
+            # or we can pass a system instruction "Start the conversation with a greeting."
+            messages = self.history + [{"role": "system", "content": "The call has just started. Say a brief introductory hello to the customer."}]
+        else:
+            self.history.append({"role": "user", "content": user_text})
+            messages = self.history
 
-        reply = response.choices[0].message.content.strip()
-        self._history.append({"role": "assistant", "content": reply})
-        logger.debug("LLM reply: %.80r", reply)
-        return reply
+        try:
+            response = await self.client.chat.completions.create(
+                model=settings.groq_model,
+                messages=messages,
+                max_tokens=150,
+                temperature=0.7,
+            )
+            reply = response.choices[0].message.content.strip()
+            self.history.append({"role": "assistant", "content": reply})
+            return reply
+        except Exception as e:
+            # Fallback handling
+            fallback = "Maaf kijiyega, mujhe theek se sunai nahi diya. Kya aap dohra sakte hain?" # "Sorry, I couldn't hear properly. Can you repeat?"
+            return fallback
+
+    async def chat(self, user_text: str) -> str:
+        return await self.get_response(user_text)
 
     def get_full_transcript(self) -> str:
-        """
-        Return the full conversation as a transcript string.
-        Format: "Customer: ...\nAgent: ..."
-        """
+        """Return the whole conversation formatted as a string."""
         lines = []
-        for msg in self._history:
-            role = "Customer" if msg["role"] == "user" else "Agent (Riya)"
-            lines.append(f"{role}: {msg['content']}")
+        for msg in self.history:
+            lines.append(f"{msg['role']}: {msg['content']}")
         return "\n".join(lines)
+

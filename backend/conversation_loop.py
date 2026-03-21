@@ -23,7 +23,7 @@ from backend.conversation_engine import ConversationEngine
 from backend.models import Lead
 from backend.recording_manager import RecordingManager
 from backend.speech_to_text import has_speech, transcribe
-from backend.text_to_speech import synthesize_streaming
+from backend.text_to_speech import TextToSpeech
 
 logger = logging.getLogger(__name__)
 
@@ -37,12 +37,13 @@ async def _speak_with_barge_in(
     controller: CallController,
     recorder: RecordingManager,
     barge_in_event: asyncio.Event,
+    tts: TextToSpeech,
 ) -> None:
     """
     Stream TTS to the gateway. Stop early if barge_in_event is set.
     Records every chunk to recorder.write_agent().
     """
-    async for pcm_chunk in synthesize_streaming(text):
+    async for pcm_chunk in tts.synthesize_streaming(text):
         if barge_in_event.is_set():
             logger.info("Barge-in detected — aborting playback.")
             break
@@ -110,13 +111,16 @@ async def run_conversation(
     audio_queue: asyncio.Queue[bytes] = asyncio.Queue()
     controller.register_audio_tap(audio_queue.put_nowait)
 
+    # Initialize TTS
+    tts = TextToSpeech()
+
     # Opening greeting — no barge-in for first turn
     greeting = (
         f"नमस्ते! मैं Riya बोल रही हूं, WebPro Solutions से। "
         f"क्या मैं {lead.owner_name} जी से बात कर सकती हूं?"
     )
     logger.info("Starting conversation with greeting")
-    async for pcm_chunk in synthesize_streaming(greeting):
+    async for pcm_chunk in tts.synthesize_streaming(greeting):
         recorder.write_agent(pcm_chunk)
         await controller.send_audio(pcm_chunk)
 
@@ -138,13 +142,13 @@ async def run_conversation(
             continue
 
         logger.info("Customer said: %r", transcript)
-        reply = engine.chat(transcript)
+        reply = await engine.chat(transcript)
         logger.info("Agent reply: %r", reply)
 
         # Speak reply with barge-in support
         barge_in_event = asyncio.Event()
         speak_task = asyncio.create_task(
-            _speak_with_barge_in(reply, controller, recorder, barge_in_event)
+            _speak_with_barge_in(reply, controller, recorder, barge_in_event, tts)
         )
         listen_task = asyncio.create_task(
             _listen_for_speech(audio_queue, barge_in_event)
@@ -158,11 +162,11 @@ async def run_conversation(
             recorder.write_customer(customer_pcm)
             transcript = transcribe(customer_pcm)
             if transcript.strip():
-                reply = engine.chat(transcript)
+                reply = await engine.chat(transcript)
                 logger.info("Barge-in reply: %r", reply)
                 # Speak the reply in the next turn
                 barge_in_event = asyncio.Event()
-                async for pcm_chunk in synthesize_streaming(reply):
+                async for pcm_chunk in tts.synthesize_streaming(reply):
                     if barge_in_event.is_set():
                         break
                     recorder.write_agent(pcm_chunk)

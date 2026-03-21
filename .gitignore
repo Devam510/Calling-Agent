@@ -40,3 +40,23 @@ recordings/
 .idea/
 *.swp
 .DS_Store
+
+# Android Build & Gradle
+android/.gradle/
+android/app/build/
+android/build/
+android/local.properties
+android/gradle-8.7.zip
+android/gradle-8.7/
+android/gradle_out.txt
+android/gradlew
+android/gradlew.bat
+android/gradle/wrapper/gradle-wrapper.jar
+
+# Models
+models/
+
+# Test Outputs
+*.txt
+!requirements.txt
+!prompts/*.txt

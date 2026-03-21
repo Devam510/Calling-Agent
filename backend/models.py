@@ -112,6 +112,7 @@ class GatewayMessageType(str, Enum):
     CALL_STATE  = "CALL_STATE"   # ringing | connected | ended | failed
     AUDIO_IN    = "AUDIO_IN"     # Base64-encoded PCM chunk ← mic
     DTMF_ACK    = "DTMF_ACK"
+    ERROR       = "ERROR"
 
 
 @dataclass

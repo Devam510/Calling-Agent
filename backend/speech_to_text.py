@@ -52,7 +52,8 @@ def _load_vad():
             repo_or_dir="snakers4/silero-vad",
             model="silero_vad",
             force_reload=False,
-            onnx=True,
+            onnx=False,
+            trust_repo=True
         )
     return _vad_model, _vad_utils
 
@@ -78,13 +79,19 @@ def pcm_to_wav_bytes(pcm: bytes) -> bytes:
 
 def has_speech(pcm_chunk: bytes, threshold: float = 0.5) -> bool:
     """
-    Quick VAD check on a small PCM chunk.
+    Quick VAD check on a PCM chunk.
 
-    L003: silence window of VAD_SILENCE_MS / 1000 seconds is handled by the
-    caller (conversation_loop.py) which accumulates chunks until this returns
-    False for long enough before triggering transcription.
+    Silero VAD expects exactly 512 samples (1024 bytes) for 16kHz audio.
+    If the chunk is larger or smaller, we pad or truncate it to evaluate.
     """
     model, _ = _load_vad()
+    
+    # Pad to 1024 bytes if needed, or truncate
+    if len(pcm_chunk) < 1024:
+        pcm_chunk = pcm_chunk + b"\0" * (1024 - len(pcm_chunk))
+    elif len(pcm_chunk) > 1024:
+        pcm_chunk = pcm_chunk[:1024]
+        
     audio_np = np.frombuffer(pcm_chunk, dtype=np.int16).astype(np.float32) / 32768.0
     audio_tensor = torch.from_numpy(audio_np)
     speech_prob = model(audio_tensor, SAMPLE_RATE).item()
@@ -122,3 +129,58 @@ def transcribe(pcm: bytes, language: str = "hi") -> str:
     transcript = " ".join(seg.text.strip() for seg in segments).strip()
     logger.debug("Transcribed [%s]: %r", info.language, transcript)
     return transcript
+
+
+import asyncio
+from typing import AsyncIterator
+
+class SpeechToText:
+    """
+    Stateful streaming STT wrapper that processes an async stream of audio chunks.
+    Accumulates audio and yields transcriptions when a silence threshold is met.
+    """
+    def __init__(self):
+        # 1 frame for Silero VAD is 512 samples = 32ms
+        self.silence_chunks = settings.vad_silence_ms // 32
+
+    async def transcribe_stream(self, audio_stream: AsyncIterator[bytes], language: str = "hi") -> AsyncIterator[str]:
+        buffer = bytearray()
+        frame_buffer = bytearray()
+        silence_count = 0
+        speech_started = False
+        
+        loop = asyncio.get_running_loop()
+
+        async for chunk in audio_stream:
+            buffer.extend(chunk)
+            frame_buffer.extend(chunk)
+            
+            # Process VAD in 1024-byte (32ms) frames
+            while len(frame_buffer) >= 1024:
+                frame = frame_buffer[:1024]
+                del frame_buffer[:1024]
+                
+                # Check VAD
+                # run_in_executor for VAD is usually not needed because it's tiny, but we do it synchronously here
+                is_speech = has_speech(bytes(frame), threshold=0.5)
+                
+                if is_speech:
+                    speech_started = True
+                    silence_count = 0
+                else:
+                    if speech_started:
+                        silence_count += 1
+                
+                # Trigger transcription if silence threshold met
+                if speech_started and silence_count >= self.silence_chunks:
+                    pcm_data = bytes(buffer)
+                    
+                    # Offload to thread so we don't block the async loop
+                    transcript = await loop.run_in_executor(None, transcribe, pcm_data, language)
+                    if transcript:
+                        yield transcript
+                    
+                    # Reset buffers for next utterance
+                    buffer.clear()
+                    speech_started = False
+                    silence_count = 0

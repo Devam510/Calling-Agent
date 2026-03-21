@@ -68,6 +68,7 @@
 
 ## Bug Fixes & Operational Issues
 - [x] Fix Google Sheets column headers (GSpreadException: expected_headers mismatch)
+- [/] Fix Piper TTS streaming error: 'Piper' object has no attribute 'synthesize_stream_raw'
 
 ---
 

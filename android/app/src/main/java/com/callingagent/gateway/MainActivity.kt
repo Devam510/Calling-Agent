@@ -7,6 +7,9 @@ import android.os.Bundle
 import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
+import android.net.Uri
+import android.os.Build
+import android.provider.Settings
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -49,6 +52,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         requestPermissionsIfNeeded()
+        checkOverlayPermission()
     }
 
     private fun startGateway() {
@@ -85,6 +89,15 @@ class MainActivity : AppCompatActivity() {
         if (requestCode == PERM_REQUEST_CODE) {
             val allGranted = grantResults.all { it == PackageManager.PERMISSION_GRANTED }
             statusText.text = if (allGranted) "Permissions granted ✓" else "⚠ Some permissions denied"
+        }
+    }
+
+    private fun checkOverlayPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            if (!Settings.canDrawOverlays(this)) {
+                val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))
+                startActivity(intent)
+            }
         }
     }
 }
